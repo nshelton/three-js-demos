@@ -1,0 +1,239 @@
+<html>
+<head>
+<script src="https://code.jquery.com/jquery-2.1.3.min.js" type="text/javascript"> </script>
+
+<script src="js/three.min.js" type="text/javascript"></script>
+<script src="js/three.util.js" type="text/javascript"></script>
+<script src="js/TrackballControls.js" type="text/javascript"></script>
+<script src="js/dat.gui.min.js" type="text/javascript"></script>
+<script src="./data/stripped_transactions.js" type="text/javascript"></script>
+ 
+<script src="fonts/helvetiker_regular.typeface.js"></script>
+
+
+</head>
+<body style="margin:0">
+</body >
+<script type="text/javascript">
+
+var g_mesh;
+function initScene(scene, camera, controls, renderer) {
+  // scene.fog = new THREE.FogExp2( 0x000000, 0.0009 );
+
+  controls.target.set(0, 0, 0);
+  camera.position.set(700,300,50)
+	controls.noZoom = false;
+	controls.noPan = false;
+  renderer.setClearColor(new THREE.Color(.20,.20,.20));
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	var container = $('body');
+    container.append(renderer.domElement);
+}
+function genText(text, x) {
+  var textplane = new THREE.Object3D();
+  var textparam = {
+    size : 20, 
+    height: 1
+  }
+
+  var material = new THREE.MeshBasicMaterial({color: 0x888888});
+  var geometry = new THREE.TextGeometry(text, textparam);
+
+  var text =  new THREE.Mesh(geometry, material);
+  text.position.set(300, x * 200 -100, -50);
+  text.rotation.set(0, 3.14/2, 3.14/2)
+  textplane.add(text);
+
+  return textplane;
+}
+
+function getLegend() {
+  var legend = new THREE.Object3D();
+
+  var examples = [1, 10, 50, 100, 500, 1000, 5000];
+
+  for( var i = 0; i < examples.length; i++ ) {
+     var pos = new THREE.Vector3(30 * i,-100, 0)
+     var rad = Math.pow( examples[i] * ( 3/(4*3.1415)), 1/3) * 2.
+     rad = Math.pow( examples[i], 0.5);
+     legend.add( getSphere(pos,rad, new THREE.Color(0x888888)) );
+
+     var textparam = {
+        size : 10, 
+        height: 1
+      }
+
+    var material = new THREE.MeshBasicMaterial({color: 0x888888});
+    var geometry = new THREE.TextGeometry("$"+examples[i], textparam);
+
+    var text =  new THREE.Mesh(geometry, material);
+    text.position.copy(pos);
+    text.position.y -= 500;
+    text.position.x += 5;
+
+    text.rotation.set(0, 0, 3.14/2)
+    legend.add(text);
+
+  }
+  legend.rotation.y=3.1415/2;
+  legend.position.set(100,100,100)
+
+  return legend;
+}
+
+function getLabels() {
+  var labels = new THREE.Object3D();
+
+  labels.add(genText("Jan",1));
+  labels.add(genText("Feb",2));
+  labels.add(genText("Mar",3));
+  labels.add(genText("Apr",4));
+  labels.add(genText("May",5));
+  labels.add(genText("Jun",6));
+  labels.add(genText("Jul",7));
+  labels.add(genText("Aug",8));
+  labels.add(genText("Sep",9));
+  labels.add(genText("Oct",10));
+  labels.add(genText("Nov",11));
+  labels.add(genText("Dec",12));
+
+  labels.add(genText("Jan",13));
+  labels.add(genText("Feb",14));
+  labels.add(genText("Mar",15));
+  labels.add(genText("Apr",16));
+  labels.add(genText("May",17));
+  labels.add(genText("Jun",18));
+  labels.add(genText("Jul",19));
+  labels.add(genText("Aug",20));
+  labels.add(genText("Sep",21));
+  labels.add(genText("Oct",22));
+  labels.add(genText("Nov",23));
+  labels.add(genText("Dec",24));
+
+  return labels;
+}
+
+
+function getSphere(pos,rad,c, text) {
+  var geometry = new THREE.BoxGeometry( rad,rad,rad );
+  var material = new THREE.MeshBasicMaterial( { transparent:true, opacity:0.75, color: c} );
+  var mesh =  new THREE.Mesh( geometry, material );
+  mesh.position.copy(pos);
+  mesh.data = text;
+  return mesh;
+}
+
+function drawBars(bars1, bars2, min, max) {
+  bars = new THREE.Object3D();
+
+  for( var i = min; i <= max; i++ ) {
+    var geometry = new THREE.PlaneGeometry( bars1[i]/10, 20, 1, 1);
+    var c = new THREE.Color(bars1[i]/800 + 0.2, 0, 0.0);
+    var material = new THREE.MeshBasicMaterial( { color: c, side: THREE.DoubleSide} );
+    var plane = new THREE.Mesh( geometry, material );
+
+    var geometry2 = new THREE.PlaneGeometry( bars2[i]/10, 20, 1, 1);
+    c = new THREE.Color(0.0, bars2[i]/2000 + 0.2, 0.0);
+    var material2 = new THREE.MeshBasicMaterial( { color: c, side: THREE.DoubleSide} );
+    var plane2 = new THREE.Mesh( geometry2, material2 );
+
+    plane.rotation.set(0, 0, 0);
+    plane.position.set(200, 50 * i - 10, 0);
+
+    plane2.rotation.set(0, 0, 0);
+    plane2.position.set(200, 50 * i + 10, 0);
+    bars.add(plane)
+    bars.add(plane2)
+  }
+
+  return bars;
+}
+
+scene_wrapper = new THREE.Object3D();
+
+$( document ).ready(function() {
+	scene = new THREE.Scene();
+	camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.1, 10000);
+  controls = new THREE.TrackballControls( camera );
+	var renderer = new THREE.WebGLRenderer();
+
+	initScene(scene, camera, controls, renderer);
+
+  scene_wrapper.add(getLabels());
+  scene_wrapper.add(getLegend());
+  scene_wrapper.rotation.x = -3.1415/2
+  scene_wrapper.position.z = 400
+  scene_wrapper.position.x = -130
+  scene_wrapper.add(getAxes(100))
+  scene.add(scene_wrapper);
+
+  processData(data)
+  projector = new THREE.Projector();
+
+  $("canvas").click(function(event) {
+      mousex = ( event.clientX / window.innerWidth ) * 2 - 1;
+     mousey = - ( event.clientY / window.innerHeight ) * 2 + 1;
+      var vector = new THREE.Vector3( mousex, mousey, 1 );
+    projector.unprojectVector( vector, camera );
+    var ray = new THREE.Raycaster( camera.position, vector.sub( camera.position ).normalize() );
+
+    // create an array containing all objects in the scene with which the ray intersects
+    var intersects = ray.intersectObjects( scene_wrapper.children );
+    console.log(intersects[0].object.data)
+  });
+
+	function render() {
+    controls.update();
+    renderer.render( scene, camera );   
+    requestAnimationFrame( render );
+	}
+	render();
+});
+
+
+
+function processData(items) {
+
+  var totals = {}
+  var income = {}
+
+  for( var i = 0; i < items.length; i++) {
+    if (items[i].amount > 9000 ) 
+      continue;
+
+    var parsed_date = new Date(items[i].date)
+
+    var c = new THREE.Color(items[i].amount/50 + 0.2, 0.0, 0.0);
+
+    var week = (items[i].week + 52 * (parsed_date.getYear() - 114));
+    week -= 6
+    if ( !totals[week] ) {
+      totals[week] = 0
+    }
+    if ( !income[week] ) {
+      income[week] = 0
+    }
+    if( items[i].type == "credit"){
+      c = new THREE.Color(0.0, items[i].amount/1000, 0.0);
+      income[week] += items[i].amount;
+    } else {
+      totals[week] += items[i].amount;
+    }
+
+    var rad = Math.pow(items[i].amount,0.5) //Math.pow(items[i][3] * ( 3/(4*3.1415)), 1/3) * 2.
+
+    var pos = new THREE.Vector3(
+      items[i].day * 50,
+      week * 50, 
+      items[i].num * 50 + 50);
+
+    scene_wrapper.add(getSphere(pos,rad,c,items[i].description));
+  }
+
+  scene_wrapper.add(drawBars(totals, income, -9, 91));
+
+}
+
+</script>
+
+</html>

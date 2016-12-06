@@ -1,0 +1,578 @@
+<html>
+<head>
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+	<script src="js/three.min.js"></script>
+    <script src="js/TrackballControls.js"></script>
+    <script src="js/plyloader.js"></script>
+    <script src="js/stats.min.js"></script> 
+
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.11.2/themes/smoothness/jquery-ui.css">
+
+    <script type="text/javascript" src="js/dat.gui.min.js"></script>
+    <script src="shaders/EffectComposer.js"></script>
+    <script src="shaders/RenderPass.js"></script>
+    <script src="shaders/ShaderPass.js"></script>
+    <script src="shaders/CopyShader.js"></script>
+    <script src="shaders/MaskPass.js"></script>
+    <script src="shaders/DotScreenShader.js"></script>
+    <script src="shaders/ConvolutionShader.js"></script>
+    <script src="shaders/KaleidoShader.js"></script>
+    <script src="shaders/RGBShiftShader.js"></script>
+
+    <script src="fonts/helvetiker_regular.typeface.js"></script>
+  </head>
+
+<body >
+  
+  <div id="container"> </div>
+<script type="x-shader/x-vertex" id="vertexShader">
+uniform float audio[256];
+varying vec3 vNormal;
+uniform float deform;
+uniform float multiplier;
+uniform float start;
+uniform float type;
+// uIntArray audio;
+
+  void main() {
+      vNormal = normalize((modelViewMatrix * vec4(normal, 1)).xyz);
+      vec3 pos = position;
+      // float phi = (atan(pos.y, pos.x)) / ( 2.0 *3.1415);
+      // float disp = ( 1.0 -  audio[int(phi * 256.0)])/deform;
+      float index = abs(( (pos.x / 2.0) * multiplier ) * 256.0 + start);
+
+      float val0 = ( audio[int(mod(index, 255.))] - 0.5 ) * 2.0;
+
+      float weight = fract(index);
+      float val1 = ( audio[int(mod(index +1.0, 255.)) ] - 0.5) * 2.0;
+
+      float disp = ((val1 * weight )  + (1.0-weight) * val0)  * deform/2.;
+      // float disp = val0 / deform ;
+      if ( type > 0.0)
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(disp*vNormal + pos, 1.0 );
+      else
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(disp*vec3(0.,1.,0.) + pos, 1.0 );
+
+  }
+</script>
+
+<script type="x-shader/x-vertex" id="fragmentShader">
+uniform float audio[256];
+varying vec3 vNormal;
+uniform vec3 rgb;
+
+void main() {
+
+      float theta = abs(dot(vec3(0.0,0.0,1.0), abs(vNormal)));
+      vec3 col = rgb * theta;
+      col += rgb * pow(theta,9.0);
+      gl_FragColor =  vec4(1.5*(col), 1.0); // A
+
+}
+</script>
+
+
+<script type="text/javascript">
+var ctx; //audio context 
+var buf; //audio buffer 
+var src;
+var fft;
+
+// threejs
+var gui_controls;
+var loader;
+var renderer;
+var scene;
+var camera; 
+var controls;
+var ticks;
+var buffer;
+var gpu_buffer;
+var shader_uniforms;
+var buffer_size = 256;
+var display_width = 10;
+var composer;
+
+var ply_mesh;
+var ring1;
+var avg_freqs;
+
+
+var reference_verts;
+var reference_normals;
+var centroid
+var initial_zoom = 1
+var zoom = 1
+
+var render_pass;
+var stats;
+
+var renderPass = new THREE.RenderPass( scene, camera );
+var copyPass = new THREE.ShaderPass( THREE.CopyShader );
+
+var dotScreenPass = new THREE.ShaderPass( THREE.DotScreenShader );
+var kaleidoPass = new THREE.ShaderPass( THREE.KaleidoShader );
+var RGBShiftPass = new THREE.ShaderPass( THREE.RGBShiftShader );
+RGBShiftPass.uniforms[ "amount" ].value = 0.01;
+
+function GenText(text, done) {
+  if (ply_mesh)
+    scene.remove(ply_mesh);
+
+  console.log("loaded")
+
+  var textparam = {
+      size : 0.1, 
+      height: 0.1
+    }
+
+  var textGeo = new THREE.TextGeometry(text, textparam);
+
+  textGeo.computeFaceNormals();
+  textGeo.computeVertexNormals();
+
+  centroid = new THREE.Vector3(0,0,0);
+  centroid.set(textGeo.center());
+
+
+
+  var material = new THREE.ShaderMaterial( {
+  vertexShader: document.getElementById( 'vertexShader' ).textContent,
+  fragmentShader: document.getElementById( 'fragmentShader' ).textContent,
+    uniforms: shader_uniforms
+  });
+  
+  ply_mesh= new THREE.Mesh( textGeo, material );
+
+  scene.add(ply_mesh);
+  done();
+}
+
+      // success callback when requesting audio input stream
+function startMic(stream) {
+    if (src != undefined)
+        src.stop(); 
+    window.AudioContext = window.AudioContext || window.webkitAudioContext;
+    ctx = new webkitAudioContext();
+
+    // Create an AudioNode from the stream.
+    var mediaStreamSource = ctx.createMediaStreamSource( stream );
+        //create a source node from the buffer 
+    fft = ctx.createAnalyser();
+    fft.fftSize = buffer_size;
+    // Connect it to the destination to hear yourself (or any other node for processing!)
+    mediaStreamSource.connect(fft);
+      renderFrame();
+
+}
+
+function startAudio(filename) {
+      if (src != undefined)
+        src.stop(); 
+
+      ctx = new webkitAudioContext(); //is there a better API for this? 
+      var req = new XMLHttpRequest(); 
+      //req.open("GET","808.mp3",true); 
+      req.open("GET",filename,true); 
+      //req.open("GET","oh_my.mp3",true); 
+      req.responseType = "arraybuffer"; 
+      req.onload = function() { 
+      //decode the loaded data 
+      ctx.decodeAudioData(req.response, function(buffer) { 
+        buf = buffer; 
+            //create a source node from the buffer 
+        src = ctx.createBufferSource();  
+        fft = ctx.createAnalyser();
+        fft.fftSize = buffer_size;
+        src.buffer = buf; 
+        //connect to the final output node (the speakers) 
+        src.connect(ctx.destination); 
+        src.connect(fft);
+        //play immediately
+        src.start(0); 
+        renderFrame();
+      }); 
+    }; 
+    req.send();  
+     
+}
+
+
+
+function initThreeJS() {
+      // set the scene size
+
+
+var WIDTH = 1200, HEIGHT =800;
+ticks = 0;
+// set some camera attributes
+var VIEW_ANGLE = 45, ASPECT = WIDTH / HEIGHT, NEAR = 0.1, FAR = 10000;
+
+// get the DOM element to attach to
+// - assume we've got jQuery to hand
+var container = $('#container');
+
+
+// create a WebGL renderer, camera
+// and a scene
+renderer = new THREE.WebGLRenderer( { preserveDrawingBuffer: true });
+camera =
+  new THREE.PerspectiveCamera(
+    VIEW_ANGLE,
+    ASPECT,
+    NEAR,
+    FAR);
+
+scene = new THREE.Scene();
+var directionalLight, pointLight;
+
+// add the camera to the scene
+scene.add(camera);
+// the camera starts at 0,0,0
+// so pull it back
+camera.position.z = 1;
+// start the renderer
+renderer.setSize(WIDTH, HEIGHT);
+// attach the render-supplied DOM element
+container.append(renderer.domElement);
+stats = new Stats();
+stats.domElement.style.position = 'absolute';
+stats.domElement.style.top = '0px';
+container.append( stats.domElement );
+
+var p_geometry = new THREE.RingGeometry( 0.1, 0.1, 256 );
+var ring_material = new THREE.MeshBasicMaterial( {color: 0x00ffff, wireframeLineWidth : 15, wireframe: true } );
+ring1 = new THREE.Mesh( p_geometry, ring_material );
+ring1.rotation.set(1.5,0,0);
+scene.add(ring1);
+
+
+reference_verts = []
+reference_normals = []
+
+
+for(var i = 0; i < p_geometry.vertices.length; i++)
+  reference_verts.push(p_geometry.vertices[i].clone());
+
+ring1.verticesNeedUpdate = true;
+ring1.material.wireframeLinewidth = 10;
+
+
+loader = new THREE.PLYLoader();
+
+  shader_uniforms = { 
+      audio: {
+          type: "fv1", 
+          value: gpu_buffer,
+          needsUpdate: true
+      },
+      rgb: { // float initialized to 0
+          type: "3f", 
+          value: [1,1,1]
+      },
+      deform: { // float initialized to 0
+          type: "f", 
+          value: 10.0
+      },
+      multiplier: { // float initialized to 0
+          type: "f", 
+          value: 2.0
+      },
+      start: { // float initialized to 0
+          type: "f", 
+          value: 0
+      },
+      type: { // float initialized to 0
+          type: "f", 
+          value: 1
+      }
+    };
+
+loader.addEventListener( 'load', function ( event ) {
+  if (ply_mesh)
+    scene.remove(ply_mesh);
+
+  // console.log("loaded")
+  var geometry = event.content;
+  geometry.computeFaceNormals();
+  geometry.computeVertexNormals();
+
+  centroid = new THREE.Vector3(0,0,0);
+  centroid.set(geometry.center());
+
+
+
+  var material = new THREE.ShaderMaterial( {
+  vertexShader: document.getElementById( 'vertexShader' ).textContent,
+  fragmentShader: document.getElementById( 'fragmentShader' ).textContent,
+    uniforms: shader_uniforms
+  });
+  ply_mesh= new THREE.Mesh( geometry.clone(), material );
+
+  scene.add(ply_mesh);
+ });
+    
+    // GenText("ASTRO kid", function() {
+    loader.load('ply/wolf.ply', function() {
+    // ply_mesh.scale.set(0.01,0.01,0.01);
+    ply_mesh.rotation.set(1.6, 0, 1.6);
+    
+    // ply_mesh.position.set(0.0, 0.06, 0.0);
+    // ply_mesh.scale.set(01, 0.1, 0.1);
+    // ply_mesh.rotation.set(0, 0, 0);
+
+      navigator.webkitGetUserMedia( {audio:true}, startMic, function(){alert("couldnt start mic")} );
+      composer = new THREE.EffectComposer( renderer );
+      render_pass =  new THREE.RenderPass( scene, camera ) 
+      composer.addPass(render_pass);
+      onToggleShaders();
+   });
+
+
+}
+ 
+var GUIControls = function() {
+  this.bunny = function() {
+    loader.load('ply/bun_zipper.ply', function() {
+    });
+  };
+  this.dustin = function() { 
+    loader.load('ply/dustin.ply', function() {
+    ply_mesh.rotation.set(3.14, 0, 0);
+   });
+  };
+  this.wolf = function() { 
+    loader.load('ply/wolf.ply', function() {
+    ply_mesh.scale.set(0.01, 0.01, 0.01);
+    // ply_mesh.rotation.x = 3.14 ;
+   });
+  };
+
+  this.skull = function() { 
+    loader.load('ply/skull.ply', function() {
+    ply_mesh.position.set(0.0, 0.08, 0.0);
+    // ply_mesh.scale.set(01, 0.1, 0.1);
+    // ply_mesh.rotation.set(0, 0, 0);
+   });
+  };
+
+  this.astro = function() { 
+    GenText( "astro kid", function() {
+      console.log("text")
+   });
+  };
+
+
+  this.dodeca = function() { 
+    loader.load('ply/dodeca.ply', function() {
+    ply_mesh.scale.set(0.3, 0.3, 0.3);
+    // ply_mesh.scale.set(01, 0.1, 0.1);
+    // ply_mesh.rotation.set(0, 0, 0);
+   });
+  };
+  this.datasource =  false;       
+
+  this.zoom = 0.5;
+  this.auto_zoom = false;
+  this.auto_zoom_level = 1;
+  this.beat_sensitivity = 0.86;
+  this.sides = 1.0;
+  this.angle = 0.0;
+
+  this.dotScreen =  false;       
+  this.kaleido = false;          
+  this.kaleido_sides = 60;          
+  this.kaleido_angle = 60;          
+  this.RGBShift = false;         
+  this.rotation = 10; 
+  this.deform = 100;
+  this.multiplier = 1.7;
+  this.start = 37;
+  this.auto_deform = false;
+
+  this.mic = function() { 
+    navigator.webkitGetUserMedia( {audio:true}, startMic, function(){alert("couldnt start mic")} );
+   };
+
+  this.flylo = function() {  startAudio("mp3/flylo.mp3");  };    
+  this.kikari = function() {  startAudio("mp3/kikari.mp3");  };    
+  this.oh_my = function() {  startAudio("mp3/ohmy.mp3");  };    
+
+};
+//init the sound system 
+function init() { 
+
+    buffer = new Uint8Array(buffer_size);
+    gpu_buffer = new Float32Array(buffer_size);
+    gui_controls = new GUIControls();
+    var gui = new dat.GUI();
+    var f1 = gui.addFolder('Mesh');
+
+    f1.add(gui_controls, 'dustin');
+    f1.add(gui_controls, 'wolf');
+    f1.add(gui_controls, 'bunny');
+    f1.add(gui_controls, 'skull');
+    f1.add(gui_controls, 'dodeca');
+    f1.add(gui_controls, 'astro');
+
+    var f2 = gui.addFolder('Param');
+    f2.add(gui_controls, 'datasource');
+    f2.add(gui_controls, 'auto_deform');
+    f2.add(gui_controls, 'deform', -20, 20);
+    f2.add(gui_controls, 'multiplier', 0,5);
+    f2.add(gui_controls, 'start', -255, 255);
+    f2.add(gui_controls, 'beat_sensitivity', 0.5, 1.0);
+    f2.add(gui_controls, 'zoom', 0.1, 1.5);
+    f2.add(gui_controls, 'auto_zoom');
+    f2.add(gui_controls, 'auto_zoom_level', 0, 1);
+    f2.add(gui_controls, 'rotation', 0, 10);
+
+    var f3 =gui.addFolder('PostProcessing')
+
+    f3.add(gui_controls, 'dotScreen').onChange(onToggleShaders);
+    f3.add(gui_controls, 'kaleido').onChange(onToggleShaders);
+    f3.add(gui_controls, 'kaleido_sides', 0, 10).onChange(function(){kaleidoPass.uniforms.sides.value =gui_controls.kaleido_sides;});
+    f3.add(gui_controls, 'kaleido_angle', -1, 1).onChange(function(){kaleidoPass.uniforms.angle.value =gui_controls.kaleido_angle;});
+    f3.add(gui_controls, 'RGBShift').onChange(onToggleShaders);
+
+    var f4 =gui.addFolder('Audio')
+    f4.add(gui_controls, 'mic');
+    f4.add(gui_controls, 'flylo');
+    f4.add(gui_controls, 'oh_my');
+    f4.add(gui_controls, 'kikari');
+    initThreeJS();
+
+
+    avg_freqs = 100;
+
+
+} 
+
+      function onToggleShaders() {
+
+        composer = new THREE.EffectComposer( renderer);
+        
+        //Add Shader Passes to Composer
+
+        composer.addPass( render_pass );
+        
+        if (gui_controls.dotScreen){
+          composer.addPass( dotScreenPass );
+        }
+        if (gui_controls.kaleido){
+          composer.addPass( kaleidoPass );
+        }
+        if (gui_controls.RGBShift){
+          composer.addPass( RGBShiftPass );
+        }
+        composer.addPass( copyPass );
+        //set last pass in composer chain to renderToScreen
+        copyPass.renderToScreen = true;
+      }
+
+  function getPly() {
+    var p = ply_mesh.geometry.vertices
+    var f = ply_mesh.geometry.faces
+    $("body").append(p.length, "\n")
+    $("body").append(f.length, "\n")
+    for( var i = 0; i < p.length; i++) {
+      $("body").append(p[i].x, p[i].y, p[i].z, "\n")
+    }
+    for( var i = 0; i < f.length; i++) {
+      $("body").append(f[i].a, f[i].b, f[i].c, "\n")
+    }
+  }
+
+ // loop
+  function renderFrame() {
+
+    if( gui_controls.datasource){
+      fft.getByteTimeDomainData(buffer );
+      shader_uniforms.type.value = -1.0;
+    }  else {
+      fft.getByteFrequencyData(buffer );
+      shader_uniforms.type.value = 1.0;
+    }
+
+    for(var i = 0; i < buffer_size; i ++){
+      if(shader_uniforms)
+        shader_uniforms.audio.value[i] = (buffer[i]/  256 );
+    }
+
+    if (gui_controls.auto_deform) 
+       gui_controls.deform = Math.pow((Math.sin(ticks/300) /10), 0.333 );
+
+     shader_uniforms.deform.value = 1 / (gui_controls.deform);
+     shader_uniforms.multiplier.value = gui_controls.multiplier;
+     shader_uniforms.start.value = gui_controls.start;
+
+
+    for ( var j = 0 ; j < reference_verts.length; j ++) {
+      var v = reference_verts[j];
+      scale =  ((buffer[j])/128) /16.0 ;
+      ring1.geometry.vertices[j].z = v.z + scale;
+    }
+
+    // fft.getByteFrequencyData(buffer );
+    sum = 0;
+    for(var i = 0; i < 64; i ++)
+      sum += buffer[i];      
+     sum/=128.0;
+
+       RGBShiftPass.uniforms.amount.value = Math.sqrt(sum /128) / 10.0 ;
+
+
+     if (sum*gui_controls.beat_sensitivity > avg_freqs){
+      var r = Math.random();
+      var g = Math.random();
+      var b = Math.random();
+      shader_uniforms.rgb.value = [r,g,b];
+      ply_mesh.material.wireframe = false;
+      // ply_mesh.rotation.y += 0.01;
+
+       ring1.material.color.r = 1.0-r;
+       ring1.material.color.g = 1.0-g;
+       ring1.material.color.b = 1.0-b;
+
+     } else {
+
+
+     ply_mesh.material.wireframe = true;
+     }
+      avg_freqs = (avg_freqs * 99 + sum) / 100
+
+     ring1.geometry.verticesNeedUpdate = true;
+
+     ticks++;
+
+     var zoom = 1.0;
+     if(gui_controls.auto_zoom) {
+      zoom = (sum/ 255.0)  * gui_controls.auto_zoom_level / 100.0 ;
+     } else {
+      zoom = gui_controls.zoom
+     }
+
+     ring1.rotation.x = Math.sin(ticks * gui_controls.rotation/1000);
+     camera.position.x = zoom * Math.sin(ticks * gui_controls.rotation/1000);
+     camera.position.z = zoom * Math.cos(ticks * gui_controls.rotation/1000);
+     // camera.rotation.y = - Math.sin(ticks/1000) + 3.141592/2 ;
+
+
+
+     camera.rotation.set(0,ticks* gui_controls.rotation/1000,0);
+     composer.render();
+    
+     stats.update();
+     requestAnimationFrame(renderFrame);
+
+  }
+window.addEventListener('load', init, false); 
+
+</script>
+
+
+
+
+
+</body>
+</html>

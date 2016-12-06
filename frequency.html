@@ -1,0 +1,531 @@
+
+<!-- saved from url=(0037)http://localhost:8888/viz/lines1.html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+    <script src="./js/jquery.min.js"></script>
+    <style type="text/css"></style>
+    <script src="./js/three.min.js"></script>
+    <script src="./js/three.util.js"></script>
+    <script src="./js/TrackballControls.js"></script>
+    <script src="./js/cbuffer.js"></script>
+    <script src="./js/stats.min.js"></script>
+    <script src="./js/soundcloud.sdk.js"></script>
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:300' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" href="css/soundcloud_loader.css">
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-26353276-1', 'auto');
+  ga('send', 'pageview');
+</script>
+
+</head>
+
+<body id="container">
+        <div id="soundcloud_search">
+
+            <input type="text" placeholder="search tracks" id="search">
+
+            <img class="scLogo"  id="do_search" src="img/sc.png">
+
+            <div class="button" id="random"> Random </div>
+            <div id="track_name"> </div>
+
+            <div id="results"> </div>
+    </div>
+    <div id="loader" style="display:none">
+        <img src="img/loader.gif">
+    </div>
+    <div id="console">
+
+        <div class="button" id="enable_filter">Filter</div>
+        <div class="button" id="wireframe">Wireframe</div>
+        <div class="button" id="animate">Animate</div>
+        <div class="button" onclick="location.reload()">New Track</div><br><br>
+        Filter Mid :<span id="filter_mid"> 440</span> hz <br>
+        Filter Q :<span id="filter_Q"> 440</span>
+    </div>
+    <script type="text/javascript">
+        function genFreqs(num_freqs) {
+            var sample_rate = 44100;
+            var samples = new Float32Array(num_freqs)
+            for (var i = 0; i < num_freqs; i++) {
+                samples[i] = ((sample_rate / num_freqs) * i) ;
+            }
+            return samples;
+        }
+        function log_n(n, num) {
+            return Math.log(num) / Math.log(n)
+        }
+
+
+        var ctx; //audio context 
+        var buf; //audio buffer 
+        var src;
+        var fft;
+        var stats;
+        var filter;
+        // threejs
+
+        var console;
+        var filter_enabled = false;
+        var animate_camera = false;
+        var line_osc;
+        var line_fft;
+        var renderer;
+        var scene;
+        var camera;
+        var controls;
+        var ticks;
+        var buffer_size = 256;
+        var freqs = genFreqs(buffer_size);
+        var phases = new Float32Array(buffer_size);
+        var resps = new Float32Array(buffer_size);
+        var dataa = new Uint8Array(buffer_size);
+        // var buffer_size = 256;
+        var display_width = 30;
+        //circular buffer
+        var fft_history;
+        var history_size = 300;
+        var history_plane;
+        //init the sound system
+
+        var audio
+        // n in [0 ,buffersize]
+        function logScale(n) {return log_n(1.1, (n+10) * (display_width / buffer_size))   }
+        // n in [0 ,1]
+        function invlogScale(n) {
+            //map to range of [0,1]
+            return n * n  ;//Math.pow(1.1, (n- 0.1)))
+        }
+
+        function      setupDOM() {
+
+            $("#soundcloud_search").hide();
+            $("#console").show();
+
+            initThreeJS();
+
+            $("#enable_filter").click(function() {
+                if (filter_enabled) {
+                    filter_enabled = false;
+                    filter.Q.value = -0.2;
+                    $(this).text("Unfiltered")
+
+                } else {
+                    filter_enabled = true;
+                    $(this).text("Filtered")
+                }
+                $(this).toggleClass("on")
+
+            });
+
+            $("#wireframe").click(function() {
+                history_plane.material.wireframe = !history_plane.material.wireframe;
+                history_plane.material.wireframe ? $(this).text("Wire") : $(this).text("Solid")
+                $(this).toggleClass("on")
+            })
+
+            $("#animate").click(function() {
+                animate_camera = !animate_camera;
+                animate_camera ? $(this).text("Animate") : $(this).text("Trackball");
+                $(this).toggleClass("on")
+                camera.position.z = 5;
+            })
+
+            $("canvas").click(function() {});
+            $("canvas").mousemove(function(e) {
+                if (filter_enabled) {
+                    var mid = freqs[  Math.floor(buffer_size * invlogScale( e.clientX / window.innerWidth)) ];
+                    var q = Math.pow(2, (e.clientY / window.innerHeight) * 5) - 1.2;
+
+                    $("#filter_mid").text(mid.toPrecision(5))
+                    $("#filter_Q").text(filter.Q.value.toPrecision(2))
+
+                    filter.frequency.value = mid; 
+                    filter.Q.value = q - 0.2;
+                }
+
+            });
+        }
+
+        function startAudio(filename) {
+             fft_history = CBuffer(history_size);
+            for (var i = 0; i < history_size; i++) {
+                var empty = new Uint8Array(1024);
+
+                fft_history.push(empty);
+            }
+              if (src != undefined)
+                src.stop(); 
+
+              ctx = new webkitAudioContext(); //is there a better API for this? 
+              var req = new XMLHttpRequest(); 
+              //req.open("GET","808.mp3",true); 
+              req.open("GET",filename,true); 
+              req.open("GET","./audio/lambo_furby.wav",true); 
+              req.responseType = "arraybuffer"; 
+              req.onload = function() { 
+              //decode the loaded data 
+              ctx.decodeAudioData(req.response, function(buffer) { 
+                buf = buffer; 
+                    //create a source node from the buffer 
+                src = ctx.createBufferSource();  
+                fft = ctx.createAnalyser();
+                fft.fftSize = buffer_size;
+                src.buffer = buf; 
+                //connect to the final output node (the speakers) 
+                src.connect(ctx.destination); 
+                src.connect(fft);
+                //play immediately
+                src.start(0); 
+                renderFrame();
+
+              }); 
+            }; 
+            req.send(); 
+            setupDOM();
+             
+        }
+
+        function startMic(stream) {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            ctx = new webkitAudioContext();
+            var mediaStreamSource = ctx.createMediaStreamSource(stream);
+            fft = ctx.createAnalyser();
+            fft.fftSize = buffer_size;
+            mediaStreamSource.connect(fft);
+
+
+            // Create the filter
+            filter = ctx.createBiquadFilter();
+            filter.type = 'bandpass'; // Low-pass filter. See BiquadFilterNode docs
+            filter.frequency.value = 440; // Set cutoff to 440 HZ
+            filter.Q.value = -1; // Set cutoff to 440 HZ
+
+            console.log(filter)
+
+            //create a source node from the buffer 
+            src = ctx.createBufferSource();
+            fft = ctx.createAnalyser();
+            fft.fftSize = buffer_size;
+            //connect to the final output node (the speakers) 
+            mediaStreamSource.connect(filter);
+            filter.connect(fft);
+            // filter.connect(ctx.destination)
+            //play immediately
+
+            renderFrame();
+
+        }
+
+        function startSoundCloud(soundcloud_id) {
+            fft_history = CBuffer(history_size);
+
+            for (var i = 0; i < history_size; i++) {
+                var empty = new Uint8Array(1024);
+
+                fft_history.push(empty);
+            }
+
+            var ctx;
+            if (typeof AudioContext !== "undefined") {
+                ctx = new AudioContext();
+            } else if (typeof webkitAudioContext !== "undefined") {
+                ctx = new webkitAudioContext();
+            } else {
+                throw new Error('AudioContext not supported. :(');
+            }
+
+            var url = 'http://api.soundcloud.com/tracks/' + soundcloud_id + '/stream' +
+                '?client_id=ef7c840eba664a8d571af8b880af07f9';
+            audio = new Audio();
+
+            var req = new XMLHttpRequest();
+            audio.src = url;
+            src = ctx.createMediaElementSource(audio);
+
+            audio.onloadeddata = function() {
+               renderFrame()
+               console.log("loaded data")
+            }
+
+            src.buffer = buf;
+
+            $("#loader").hide();
+
+
+
+            // Create the filter
+            filter = ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 440;
+            filter.Q.value = -1;
+
+            fft = ctx.createAnalyser();
+            fft.fftSize = buffer_size;
+
+            //routing
+            src.connect(filter);
+            filter.connect(fft);
+            fft.connect(ctx.destination)
+            src.mediaElement.play();
+
+
+            setupDOM();
+            renderFrame();
+
+        }
+
+
+        function init() {
+
+            SC.initialize({
+                client_id: 'ef7c840eba664a8d571af8b880af07f9'
+            });
+
+            $("#do_search").click(function() {
+                SC.get('/tracks', {
+                    q: $("#search").val()
+                }, function(tracks) {
+                    $("#results").empty()
+                    console.log(tracks[0])
+                    for (var i = 0; i < tracks.length; i++) {
+                        if (tracks[i].streamable) {
+
+                            $('<img>', {
+                                src: tracks[i].artwork_url || tracks[i].user.avatar_url,
+                                id: tracks[i].id,
+                                name: tracks[i].title
+                            }).appendTo($("#results"));
+
+                        }
+                    }
+
+                    $("#results img").click(function() {
+                        $("#loader").show();
+                        startSoundCloud(this.id);
+
+                    });
+                    $("#results img").mouseover(function() {
+                        $("#track_name").text(this.name);
+                    });
+                });
+            })
+            $("#random").click(function() {
+                $("#soundcloud_search").hide();
+                $("#console").show();
+                $("#loader").show();
+                SC.get('/playlists/27087959', function(playlist) {
+                    var num = playlist.tracks.length
+                    startSoundCloud(playlist.tracks[Math.floor(num * Math.random())].id)
+                })
+
+            });
+            $("#lambo").click(function() {
+                startAudio();
+            });
+        }
+
+        // loop
+        function renderFrame() {
+            stats.begin();
+
+            var datab = new Uint8Array(buffer_size);
+            fft.getByteTimeDomainData(dataa);
+
+            for (var j = 0; j < buffer_size; j++) {
+                line_osc.geometry.vertices[j].y = (dataa[j] / 256 - 0.5) * 5;
+            }
+
+
+            fft.getByteFrequencyData(datab);
+
+            fft_history.push(datab)
+            if (filter_enabled) 
+                filter.getFrequencyResponse(freqs, resps, phases);
+
+            for (var j = 0; j < buffer_size/2; j++) {
+                if (filter_enabled) {
+                    line_fft.geometry.vertices[j].z = resps[j] * 3 ;
+                } else {
+                    line_fft.geometry.vertices[j].z = datab[j] / 64;
+                }
+            }
+
+            new_col = new THREE.Color(0, 0, 0);
+
+            for (var row = 0; row < history_size; row++) {
+                for (var i = 0; i <= buffer_size/2; i++) {
+                    var val = fft_history.get(row)[i] / 128;
+
+                    history_plane.geometry.vertices[row * (buffer_size / 2 + 1) + (i)].z = val * 2;
+                    // val = val * (i /buffer_size) ;
+                    // val = 1 - val
+                    val /= 2
+                    val = 1.0 - val
+                    new_col.setHSL(1 - val, 1, 1 - val);
+                    history_plane.geometry.colors[row * (buffer_size / 2 + 1) + (i)].copy(new_col) 
+                }
+            }
+
+            history_plane.geometry.verticesNeedUpdate = true;
+            history_plane.geometry.colorsNeedUpdate = true;
+
+            line_fft.geometry.verticesNeedUpdate = true;
+            line_osc.geometry.verticesNeedUpdate = true;
+
+            ticks++;
+            var period = 1000 // * Math.sin(ticks/100) + 500 ;
+            if (animate_camera) {
+                camera.position.x = display_width/2 * Math.cos(ticks / period) ;
+                camera.position.y = display_width/2 * Math.sin(ticks / period) + display_width/2;
+                camera.position.z = display_width/4 * Math.sin(2* (ticks / period));
+                // camera.position.add(controls.target)
+            }
+            controls.update();
+
+            renderer.render(scene, camera);
+            stats.end();
+            requestAnimationFrame(renderFrame);
+
+        }
+
+        window.addEventListener('load', init, false);
+
+        function constructLine(width, log_scale) {
+
+            var material = new THREE.LineBasicMaterial({
+                color: 0xffffff,
+                linewidth: 30
+            });
+            var geometry = new THREE.Geometry();
+            geometry.dynamic = true;
+
+            step = display_width / width
+            for (var i = 0; i < width; i++) {
+
+                var x = i * step
+                if (log_scale)
+                    x = logScale(i);
+                geometry.vertices.push(new THREE.Vector3(x, 0, 0));
+            }
+            return new THREE.Line(geometry, material);
+        }
+
+        function getMesh(scene) {
+
+            var history_geometry = new THREE.PlaneGeometry(display_width, display_width, buffer_size / 2, history_size);
+            history_geometry.colors = [];
+
+            for (var i = 0; i < history_geometry.vertices.length; i++) {
+                history_geometry.colors.push(new THREE.Color(0.5, 0.5, 0.5));
+            }
+
+            for (var i = 0; i < history_geometry.faces.length; i++) {
+                var ida = history_geometry.faces[i].a;
+                var idb = history_geometry.faces[i].b;
+                var idc = history_geometry.faces[i].c;
+                history_geometry.faces[i].vertexColors.push(history_geometry.colors[ida])
+                history_geometry.faces[i].vertexColors.push(history_geometry.colors[idb])
+                history_geometry.faces[i].vertexColors.push(history_geometry.colors[idc])
+            }
+
+            var history_material = new THREE.MeshBasicMaterial({
+                vertexColors: THREE.VertexColors,
+                wireframe: true,
+                side: THREE.DoubleSide
+            });
+            history_plane = new THREE.Mesh(history_geometry, history_material);
+
+            history_plane.position.set(0,display_width/2,0);
+
+            // Log Log Scrunch up
+            for (var row = 0; row <= history_size; row++) {
+                for (var i = 0; i < buffer_size/2; i++) {
+                    history_plane.geometry.vertices[row * (buffer_size / 2 + 1) + (i)].x = logScale(i);
+                }
+            }
+
+            return history_plane;
+
+        }
+
+
+        function configureControls(controls) {
+
+            controls.rotateSpeed = 1.0;
+            controls.zoomSpeed = 1.2;
+            controls.panSpeed = 0.8;
+
+            controls.noZoom = false;
+            controls.noRotate = false;
+
+            controls.target.set(0,display_width/2,0);
+            controls.staticMoving = true;
+            controls.dynamicDampingFactor = 0.3;
+        }
+
+        function initThreeJS() {
+            // set the scene size
+            var WIDTH = window.innerWidth,
+                HEIGHT = window.innerHeight;
+            ticks = 0;
+
+
+            // set some camera attributes
+            var VIEW_ANGLE = 29,
+                ASPECT = WIDTH / HEIGHT,
+                NEAR = 0.1,
+                FAR = 10000;
+
+
+
+            // create a WebGL renderer, camera
+            // and a scene
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(WIDTH, HEIGHT);
+            camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+
+            controls = new THREE.TrackballControls(camera);
+            configureControls(controls);
+
+            scene = new THREE.Scene();
+            var directionalLight, pointLight;
+            scene.add(camera);
+
+            camera.position.z = display_width * 1.5;
+
+            var container = $('#container');
+            container.append(renderer.domElement);
+
+            line_osc = constructLine(buffer_size, false);
+            line_osc.rotation.z = -3.1415 / 2;
+
+            line_osc.position.set(logScale(buffer_size), display_width, 0)
+            scene.add(line_osc);
+
+            line_fft = constructLine(buffer_size/2, true);
+            scene.add(line_fft);
+
+            // scene.add(getAxes(5));
+
+            scene.add(getMesh());
+
+            stats = new Stats();
+            stats.setMode(0); // 0: fps, 1: ms
+
+            // align top-left
+            stats.domElement.style.position = 'absolute';
+            stats.domElement.style.bottom = '0px';
+            stats.domElement.style.left = '0px';
+
+            document.body.appendChild(stats.domElement);
+
+        }
+    </script>
+
+</body></html>

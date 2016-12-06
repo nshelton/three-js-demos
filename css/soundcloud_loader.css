@@ -1,0 +1,83 @@
+html {
+	font-family: 'Open Sans', sans-serif;
+}
+
+img, div{
+	display: inline;
+	float: left;
+}
+
+#container {
+	background-color: rgb(0, 0, 0);
+}
+
+#loader {
+	margin-left: 40%;
+	margin-top: 20%;
+}
+
+#results {
+	margin-top: 10px;
+}
+
+#random {
+	margin: 10px;
+}
+
+#console {
+	display: none;
+	position: absolute;
+	top: 0; left: 0;
+	color: whitesmoke;"
+}
+
+#console span {
+	margin-top:10px;
+}
+
+
+input {
+	font-size: 1em;
+	padding: 5px;
+	width:	18em ;
+	border-radius: 3px;
+	float: left;
+	margin: 10px;
+}
+.scLogo {
+	float:left;
+	height:3em;
+}
+
+.button{
+	border-radius: 5px;
+    padding: 5px;
+    /*background-color: 999999;*/
+    border: 1px solid white;
+    width: 5em;
+    margin:10px;
+
+}
+
+div.on {
+    padding: 5px;
+    background-color: white;
+    color : black;
+}
+
+.search { 
+	width: 10em;
+	float: left;
+	display:inline;
+	margin: 10px;
+}
+
+#soundcloud_search {
+	width: 90%;
+	margin: 5%; 
+	color: whitesmoke;
+}
+#track_name {
+	width:100%;
+	margin:10px;
+}

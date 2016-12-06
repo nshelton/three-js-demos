@@ -1,0 +1,504 @@
+<html>
+<head>
+<script src="https://code.jquery.com/jquery-2.1.3.min.js" type="text/javascript"> </script>
+
+<script src="twitter_data/points.js" type="text/javascript"></script>
+<script src="twitter_data/sfCensus.js" type="text/javascript"></script>
+<script src="twitter_data/sf.js" type="text/javascript"></script>
+
+<script src="js/three.min.js" type="text/javascript"></script>
+<script src="js/TrackballControls.js"></script>
+<script src="js/plyloader.js"></script>
+<script src="js/dat.gui.min.js"></script>
+ 
+<script src="fonts/helvetiker_regular.typeface.js"></script>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-26353276-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+
+</head>
+<body id="container" style="margin:0">
+</body >
+<script type="text/javascript">
+var tweet_coordinates
+
+// blues
+var colorScheme = {
+	text 		: 0x69C9D6,
+	tweets 		: 0xFFBA7A,
+	popBar 		: 0xFF8E26,
+	tweetBar 	: 0x1EA5B8, 
+	topo 		: 0x026C7B,
+	hoods 		: 0xFF7600,
+	ground 		: 0x403D3A
+}
+
+function drawLine(scene, outline) {
+    var geometry = new THREE.Geometry();
+    var material = new THREE.LineBasicMaterial();
+
+    for( var i =outline.length-1; i >=0; i--) {
+    	geometry.vertices.push(new THREE.Vector3(outline[i][0], outline[i][1], i/10000));
+    }
+
+	scene.add(new THREE.Line(geometry, material))
+}
+
+function drawCensus(scene, outlines) {
+
+	var hoods = new THREE.Object3D();
+		console.log(outlines)
+
+    for( var b = 0; b < outlines.features.length; b++) {
+
+		var tract = outlines.features[b].geometry.coordinates[0];
+ 		if (tract.length == 1) {
+ 			tract = tract[0]
+ 		}
+
+ 		var pts = []
+ 		var i = tract.length-1
+ 		while (i-- > 0) {
+			pts.push(new THREE.Vector2(tract[i][0], tract[i][1]) );
+			
+		}
+
+
+		var height = outlines.features[b].properties.Pop_psmi / 2000000
+
+		var shape = new THREE.Shape(pts);
+		var extrudeSettings = {
+					amount			: height,
+					steps			: 1,
+					extrudeMaterial : 0,
+					bevelEnabled	: false,
+				};
+
+
+		var geometry = new THREE.ExtrudeGeometry( shape, extrudeSettings );
+
+		var material = new THREE.MeshLambertMaterial( {
+			side: THREE.DoubleSide,
+	   	    color: new THREE.Color(colorScheme.popBar).multiplyScalar(height* 80), 
+
+			shading: THREE.SmoothShading,
+			// opacity:0.85,
+		    // transparent:true
+		 } );
+		var mesh = new THREE.Mesh( geometry, material);
+
+    	hoods.children.push(mesh);
+
+		
+
+	}
+	scene.add(hoods)
+}
+
+function genText(text, height) {
+	var textparam = {
+		size : height, 
+		height: height/10
+	}
+
+	var material = new THREE.MeshBasicMaterial({opacity:1.0, transparent:true ,color: colorScheme.text});
+	var geometry = new THREE.TextGeometry(text, textparam);
+    // geometry.computeFaceNormals()
+    // geometry.computeVertexNormals()
+
+	// var material = new THREE.MeshLambertMaterial( {
+		// side: THREE.DoubleSide,
+		// shading: THREE.SmoothShading,
+	 	// color: 0x00ffff
+		// wireframe: true
+		 // } );
+	return new THREE.Mesh(geometry, material);
+}
+
+function genCube(quad, height, cubecolor, transparent) {
+
+
+	var verts = 
+   [new THREE.Vector3(quad[0][0], quad[0][1], 0),
+	new THREE.Vector3(quad[0][0], quad[0][1], height),
+	new THREE.Vector3(quad[1][0], quad[1][1], 0),
+	new THREE.Vector3(quad[1][0], quad[1][1], height),
+	new THREE.Vector3(quad[2][0], quad[2][1], 0),
+	new THREE.Vector3(quad[2][0], quad[2][1], height),
+	new THREE.Vector3(quad[3][0], quad[3][1], 0),
+	new THREE.Vector3(quad[3][0], quad[3][1], height)];
+
+	var faces = 
+	 [new THREE.Face3(2,0,1), new THREE.Face3(1,3,2),
+	 new THREE.Face3(4,5,6), new THREE.Face3(5,7,6),
+	 new THREE.Face3(1,0,7), new THREE.Face3(7,0,6),
+	 new THREE.Face3(3,5,2), new THREE.Face3(2,5,4),
+	 new THREE.Face3(0,2,6), new THREE.Face3(4,6,2),
+	 new THREE.Face3(5,3,1), new THREE.Face3(5,1,7)
+	 ]
+
+	// var material = new THREE.MeshPhongMaterial( {side: THREE.DoubleSide, color: cubecolor } ) 
+	// var material = new THREE.MeshBasicMaterial({wireframe:true, color: new THREE.Color( height*100, 0, 1 - height* 100 ), wireframeLinewidth: 10});
+	var material  = new THREE.MeshBasicMaterial({depthWrite: true, depthTest: false, wireframe:true, color: new THREE.Color( height*100, 0, 1 - height* 100 )});
+
+	if (transparent){
+		material = new THREE.MeshBasicMaterial({depthWrite: true, depthTest: false, opacity:0.95, transparent:true, color: new THREE.Color( height*100, 0, 1 - height* 100 )});
+	}
+
+	var geometry = new THREE.BoxGeometry( height, height, height);
+	geometry.vertices = verts;
+	geometry.faces = faces;
+		return new THREE.Mesh(geometry, material);
+
+}
+function genBox(position, basewidth, height, cubecolor, transparent) {
+
+	if(height == 0)
+		return false
+
+	var col = new THREE.Object3D()
+    var geometry = new THREE.BoxGeometry( basewidth, basewidth, height);
+
+	geometry.computeFaceNormals()
+	geometry.computeVertexNormals()
+	var material = new THREE.MeshLambertMaterial( {
+		side: THREE.DoubleSide,
+	   	color: new THREE.Color(colorScheme.tweetBar).multiplyScalar((height* 100) + 0.3), 
+		shading: THREE.SmoothShading,
+		opacity:0.5,
+	    transparent:true
+		 } );
+	var segment = new THREE.Mesh( geometry, material );
+
+	segment.position.set(
+		position[0],
+		position[1],
+		height / 2 - 1e-3	
+		);
+
+	col.children.push(segment)
+
+	return col
+
+}
+
+function getColorFromTime(time) {
+	d = new Date(time);
+	h = d.getHours() / 24
+	return new THREE.Color(h,0,1-h);
+}
+
+function drawHoods(scene, outlines) {
+
+	var hoods = new THREE.Object3D();
+	var names = new THREE.Object3D();
+
+	var raycaster = new THREE.Raycaster();
+	
+	var line_material = new THREE.LineBasicMaterial( { blending: THREE.AdditiveBlending, color:  colorScheme.hoods, linewidth:1} );
+
+    for( var b = 0; b < outlines.length; b++) {
+		var hood = outlines[b].geometry.coordinates[0];
+
+   		 var line_geometry = new THREE.Geometry();
+	    for( var i = 0; i < hood.length; i++) {
+					var origin = new THREE.Vector3(hood[i][0], hood[i][1], 0.01);
+					var direction = new THREE.Vector3(0, 0, -1);
+				raycaster.set(origin, direction)
+				var intersects = raycaster.intersectObjects(scene.children);
+				var elevation = intersects.length > 0 ? origin.z - intersects[0].distance 	+ 0.0005: 0;
+
+		       line_geometry.vertices.push(new THREE.Vector3(hood[i][0], hood[i][1], elevation));
+		}
+
+		var name = outlines[b]['properties']["NAME"]
+		line_geometry.computeBoundingSphere();
+		text = genText(name, 0.001);
+		c =  line_geometry.boundingSphere.center
+		text.position.set(c.x, c.y, 0.001)
+    	names.children.push(text);
+		var line = new THREE.Line(line_geometry, line_material);
+    	hoods.children.push(line);
+
+	}
+	scene.add(hoods)
+	scene.add(names)
+}
+
+var lighting;
+var scene;
+
+function initScene(scene, camera, controls, renderer) {
+	
+
+    controls.target.set(-122.442358, 37.761391, 0);
+    camera.position.set( -122.458329709245, 37.72556814928819, 0.22220533778933145)
+	controls.noZoom = false;
+	controls.noPan = false;
+
+	// scene.add( new THREE.AmbientLight( 0x222222 ) );
+
+	lighting = new THREE.PointLight( 0xffffff );
+	lighting.position.copy( camera.position );
+	scene.add( lighting );
+
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	var container = $('#container');
+    container.append(renderer.domElement);
+}
+
+function getLine(params) {
+	var material = new THREE.MeshBasicMaterial({
+		opacity:0.5,
+		transparent:true,
+		color: params.color
+	});
+
+	var rad =  0.0001/2
+	if (params.size)
+		rad = params.size/2;
+
+	var geometry = new THREE.CylinderGeometry(rad, rad, 0.02, 10, 1 );
+
+    var line = new THREE.Mesh(geometry, material);
+
+  	line.rotation.x = 3.141592/2
+
+	line.position.set(
+		params.coords[0],
+		params.coords[1],
+		params.coords[2]? params.coords[2]:  -0.01
+		);
+    return line
+}
+
+function getCircle(params) {
+	var material = new THREE.MeshBasicMaterial({
+		depthWrite: false,
+		depthTest: false,
+		opacity:0.5,
+		transparent:true,
+		color: params.color
+	});
+
+	var size =  0.005
+	if (params.size)
+		size = params.size;
+	var circleGeometry = new THREE.SphereGeometry(size, 5 );				
+	var circle = new THREE.Mesh( circleGeometry, material );
+	circle.position.set(
+		params.coords[0],
+		params.coords[1],
+		params.coords[2]? params.coords[2]: 0
+	);
+	return circle;
+}
+
+function drawTweets(scene, hist_params) {
+	console.log("load tweets")
+	var raycaster = new THREE.Raycaster();
+	var geometry = new THREE.Geometry();
+	var material = new THREE.PointCloudMaterial({
+	      color: colorScheme.tweets,
+	      size: 0.0005,
+	      transparent: true,
+	      opacity: 0.75,
+	      blending: THREE.AdditiveBlending
+	    });
+
+	for (var j = 0; j < tweet_coordinates.length; j ++) {
+		var c = tweet_coordinates[j];
+		geometry.vertices.push(new THREE.Vector3(c[0], c[1], c[2]))
+	}
+	// draw hist
+	if ( hist_params) {
+		var data = computeBins(tweet_coordinates, hist_params)
+		histogram = getHistogram( hist_params, data);
+		scene.add(histogram);
+	}
+
+	var tweetCloud = new THREE.PointCloud(geometry, material)
+	scene.add(tweetCloud);
+}
+
+function drawPlane(scene, res, width, center) {
+	var geometry = new THREE.PlaneGeometry( width, width, res, res );
+	var material = new THREE.MeshBasicMaterial( {color: colorScheme.ground, wireframe : true, side: THREE.DoubleSide} );
+	var plane = new THREE.Mesh( geometry, material );
+	plane.position.set(center[0], center[1], center[2]);
+	scene.add( plane );
+}
+
+function computeBins(tweet_coords, params) {
+	console.log("compute bins")
+	bins = []
+	for( var x = 0; x< params.bins; x++){
+		bins.push([])
+		for(var y = 0; y < params.bins; y++){
+			bins[x].push(0)
+		}
+	}
+
+	for( var i = 0; i < tweet_coords.length; i ++) {
+		var x = Math.floor(params.bins * ((tweet_coords[i][0] - params.position[0]) / params.width ) )
+		var y = Math.floor(params.bins * ((tweet_coords[i][1] - params.position[1]) / params.width ) )
+		bins[x][y] += 1
+	}
+
+	console.log(params)
+	return bins
+}
+
+function getHistogram(params, histogram_data) {
+	var hist = new THREE.Object3D()
+
+	var stepsize = params.width / params.bins;
+	for( var x = 0; x< params.bins; x++){
+		for(var y = 0; y < params.bins; y++){
+			var pos = [params.position[0]+ x * stepsize, params.position[1]+ y * stepsize];
+
+			var height = histogram_data[x][y] / (7000); 
+
+			this_box = genBox(pos, stepsize, height, 0xff00ff, true);
+
+			if(this_box)
+				hist.children.push(this_box)
+
+		}		
+	}
+
+
+	return hist
+}
+
+function drawTopo(scene, next, histogram) {
+
+  var loader = new THREE.PLYLoader();
+  loader.addEventListener( 'load', function ( event ) {
+    var geometry = event.content;
+
+    geometry.computeFaceNormals()
+    geometry.computeVertexNormals()
+
+	var material = new THREE.MeshLambertMaterial( {
+		side: THREE.DoubleSide,
+		shading: THREE.SmoothShading,
+	 	color: colorScheme.topo,
+	 	transparent: true,
+	 	opacity: 0.75,
+	 	depthWrite: false
+		// wireframe: true
+		 } );
+
+	// var material = new THREE.MeshBasicMaterial( {
+	// 	color: 0x00ffff,
+	// 	wireframe: true
+	// 	// shading: THREE.SmoothShading
+	// 	// wireframe: true
+	// 	 } );
+
+
+    mesh = new THREE.Mesh( geometry.clone(), material );
+    // mesh.position.z = -0.005
+    scene.add(mesh);
+	drawHoods(scene, hoods)
+
+    next(scene, histogram)
+
+
+   });
+	loader.load( './twitter_data/sf.ply' );
+}
+
+var tweet_coords;
+
+$( document ).ready(function() {
+
+	scene = new THREE.Scene();
+	var camera = new THREE.PerspectiveCamera( 29, window.innerWidth / window.innerHeight, 0.0001, 10 );
+    var controls = new THREE.TrackballControls( camera );
+	var renderer = new THREE.WebGLRenderer();
+
+	initScene(scene, camera, controls, renderer);
+
+
+
+	var hist_params = {
+		position : [-122.4160- 0.1, 37.776775 - 0.1],
+		width : 0.15,
+		bins : 30
+	}
+
+	drawCensus(scene, SFCensus);
+
+	drawTopo(scene, drawTweets, hist_params);
+
+	drawPlane(scene, 100, 0.5, [-122.416019, 37.776775, 0] )
+
+	function render() {
+		controls.update();
+		renderer.render( scene, camera );
+	    lighting.position.copy( camera.position );
+		requestAnimationFrame( render );
+
+	}
+	render();
+
+
+
+	var myGUI = function() {
+		this.tweet=true;
+		this.topo=true;
+		this.outline=true;
+		this.census=true;
+		this.points=true;
+		this.label=true;
+		this.plane=true;
+	};
+
+	var c = new myGUI();
+	var gui = new dat.GUI();
+
+	var f2 = gui.addFolder('Histograms');
+	f2.add(c, 'tweet').name("Tweet Density").onChange(function(){
+		scene.children[6].visible = c.tweet;
+	});
+	f2.add(c, 'census').name("2010 Census Tracts").onChange(function(){
+		scene.children[1].visible = c.census;
+	});
+	var f4 = gui.addFolder('Tweets');
+	f4.add(c, 'points').name("Location").onChange(function(){
+		scene.children[7].visible = c.points;
+	});
+	var f1 = gui.addFolder('Geography');
+	f1.add(c, 'topo').name("Topography").onChange(function(){
+		scene.children[3].visible = c.topo;
+	});
+	f1.add(c, 'plane').name("Ground Plane").onChange(function(){
+		scene.children[2].visible = c.plane;
+	});
+
+	var f3 = gui.addFolder('Neighborhoods');
+	f3.add(c, 'outline').name("Hood Outlines").onChange(function(){
+		scene.children[4].visible = c.outline;
+	});
+	f3.add(c, 'label').name("Hood Names").onChange(function(){
+		scene.children[5].visible = c.label;
+	});
+
+	
+
+
+});
+</script>
+
+</html>
