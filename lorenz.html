@@ -19,7 +19,6 @@
   ga('send', 'pageview');
 
 </script>
-
 </head>
 <body style="margin:0">
 </body >
@@ -31,7 +30,7 @@ function initScene(scene, camera, controls, renderer) {
   camera.position.set(-100,0,0)
 	controls.noZoom = false;
 	controls.noPan = false;
-  renderer.setClearColor("rgb(149, 82, 81)");
+  renderer.setClearColor(0x000000);
 	renderer.setSize( window.innerWidth, window.innerHeight );
 	var container = $('body');
     container.append(renderer.domElement);
@@ -40,8 +39,10 @@ function initScene(scene, camera, controls, renderer) {
 function buildLorenzPoints(num_pts) {
   var geometry = new THREE.Geometry();
   var material = new THREE.PointCloudMaterial({
-    color:"rgb(208, 157, 93)" ,
-    size:0.5
+    color: 0xff33ff,
+    size:0.5,
+    map: THREE.ImageUtils.loadTexture("img/particle.png"),
+    glanding:THREE.AdditiveBlending
   });
 
   for( var i = 0 ; i < num_pts; i ++) {
